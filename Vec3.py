@@ -27,26 +27,23 @@ class Vec3:
         out.z = self.z - other.z
         return out
 
-    def __mul__(self, other): # Multiplication by a scalar
+    def __mul__(self, other):
         if isinstance(other, (int, float)):
             out = Vec3()
             out.x = self.x * other
             out.y = self.y * other
             out.z = self.z * other
             return out
-        # If you intend element-wise multiplication with another Vec3,
-        # it's better to use a dedicated function like mul_vec3(u,v)
-        # or overload a different operator if Python allows, to avoid confusion.
-        # For now, assuming multiplication is with a scalar based on its usage.
-        # The original Vec3.py already had __mul__ for scalar.
-        # The global mul(u,v) is for element-wise.
+        # Ten operator obsługuje mnożenie przez skalar.
+        # Do mnożenia element po elemencie z innym obiektem Vec3,
+        # użyj dedykowanej funkcji mul_vec3(u,v), aby uniknąć niejednoznaczności.
         raise TypeError("Unsupported operand type(s) for *: 'Vec3' and '{}'".format(type(other)))
 
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
-    def __truediv__(self, other): # Division by a scalar
+    def __truediv__(self, other):
         if isinstance(other, (int, float)):
             out = Vec3()
             out.x = self.x / other
@@ -62,24 +59,20 @@ def norm(v):
 def normalize(u):
     n = norm(u)
     if n == 0:
-        return Vec3(0,0,0) # Return a zero vector instead of scalar 0
+        return Vec3(0,0,0) # Zwraca wektor zerowy, gdy norma wektora wynosi zero.
     return u / n
 
 def cross(u, v):
     out = Vec3()
     out.x = u.y*v.z - v.y*u.z
-    out.y = u.z*v.x - v.z*u.x # Original had v.z*u.x, it should be u.z*v.x - v.z*u.x or v.x*u.z - u.x*v.z (swapped order is fine if consistent)
-                               # Standard: u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x
-                               # The original: u.y*v.z - v.y*u.z | u.z*v.x - v.z*u.x | u.x*v.y - v.x*u.y
-                               # Let's correct the y component: u.z*v.x - u.x*v.z
-    out.y = u.z*v.x - u.x*v.z # Corrected Y component for standard cross product
+    out.y = u.z*v.x - u.x*v.z # Poprawiona składowa Y dla standardowego iloczynu wektorowego
     out.z = u.x*v.y - u.y*v.x
     return out
 
 def dot(u, v):
     return u.x*v.x + u.y*v.y + u.z*v.z
 
-def mul_vec3(u, v): # Renamed from mul to avoid conflict if Vec3.mul was for vectors
+def mul_vec3(u, v): # Nazwa zmieniona z 'mul', aby uniknąć konfliktu z metodą __mul__ klasy Vec3 (mnożenie przez skalar).
     out = Vec3()
     out.x = u.x * v.x
     out.y = u.y * v.y

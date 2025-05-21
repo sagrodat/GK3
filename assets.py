@@ -4,6 +4,15 @@ import math
 from Vec3 import Vec3, normalize, dot, cross, norm, mul_vec3 # Added mul_vec3 explicitly
 
 
+class Material:
+    def __init__(self, name, color=Vec3(1,1,1), ambient_coeff=0.1, diffuse_coeff=0.9, specular_coeff=0.5, shininess=50):
+        self.name = name
+        self.color = color
+        self.ambient_coeff = ambient_coeff
+        self.diffuse_coeff = diffuse_coeff
+        self.specular_coeff = specular_coeff
+        self.shininess = shininess
+
 class Ray:
     def __init__(self, o, d):
         self.o = o
@@ -30,11 +39,16 @@ class Light:
         return out
 
 class Sphere:
-
-    def __init__(self, pos, radius, color=Vec3(1,0,0)):
+    def __init__(self, pos, radius, material): # Zamiast 'color'
         self.pos = pos
         self.radius = radius
-        self.color = color
+        self.material = material
+
+
+    @property
+    def color(self):
+        return self.material.color
+
         # print("Sphere at {} with radius {} and color {}".format(self.pos, self.radius, self.color)) # Optional print
 
     def normal(self, v):

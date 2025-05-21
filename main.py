@@ -1,6 +1,7 @@
 import pygame
 from Vec3 import Vec3, normalize, dot, cross, norm, mul_vec3 # Make sure mul_vec3 is imported
-from assets import Camera, Sphere, Light, floatto8bit, Ray # Added Ray for shadow rays
+from assets import Camera, Sphere, Light, Material, floatto8bit, Ray # Added Ray for shadow rays
+from materials import *
 
 # Material parameters (constants from original)
 ambient_color_effect = 0.4 * Vec3(0.4, 0.4, 1) # Renamed 'ambient' to avoid conflict if a light is named ambient
@@ -93,6 +94,9 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets, antialia
 def main_realtime():
     pygame.init()
 
+    available_materials = [metal_material, kreda_material,guma_material,plastik_material] 
+    current_material_index = 0
+
     res = 200
     screen_width = res
     screen_height = res
@@ -100,13 +104,14 @@ def main_realtime():
     pygame.display.set_caption("Real-time RayTracer - Light Pos: Arrows (XZ), PgUp/Dn (Y)")
 
     camera = Camera((res, res))
-    sphere = Sphere(pos=Vec3(0, 2, 0), radius=0.5, color=Vec3(1, 0.2, 0.2))
-    light = Light(pos=Vec3(1, 2.5, -1.5), color=Vec3(1, 1, 0.8), strength=1.5, radius=10)
+    sphere = Sphere(pos=Vec3(0, 2, 0), radius=0.5, material=available_materials[current_material_index])
+
+    light = Light(pos=Vec3(1, -2.4, -2.4), color=Vec3(1, 1, 0.8), strength=1.5, radius=10)
     
     # List of all assets in the scene for rendering and shadow calculation
     # For now, it's just the sphere. If you add more objects, add them here.
-    scene_assets = [sphere] 
-    asset_to_render = sphere # The primary asset we are focusing on, can be changed if multiple primary assets
+    scene_assets = [sphere]
+    asset_to_render = sphere 
 
     antialias_level = 0
     light_move_speed = 0.2
@@ -141,6 +146,12 @@ def main_realtime():
                     antialias_level = (antialias_level + 1) % 2
                     print(f"Antialiasing level set to: {antialias_level}")
 
+                if event.key == pygame.K_x:
+                    current_material_index = (current_material_index + 1) % len(available_materials)
+                    asset_to_render.material = available_materials[current_material_index]
+                    print(current_material_index)
+                    print(f"Sphere1 material switched to: {asset_to_render.material.name}")
+
         for u_pixel in range(camera.res_width):
             for v_pixel in range(camera.res_height):
                 # For this simple setup, the first asset intersected is the one we render.
@@ -152,14 +163,13 @@ def main_realtime():
                 closest_intersection_point = None
                 min_dist = float('inf')
 
-                for current_asset in scene_assets: # Find closest hit
-                    intersected, intersection_point_candidate = current_asset.intersect(primary_ray)
-                    if intersected:
-                        dist = norm(intersection_point_candidate - primary_ray.o)
-                        if dist < min_dist:
-                            min_dist = dist
-                            closest_hit_asset = current_asset
-                            closest_intersection_point = intersection_point_candidate
+                intersected, intersection_point_candidate = asset_to_render.intersect(primary_ray)
+                if intersected:
+                    dist = norm(intersection_point_candidate - primary_ray.o)
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_hit_asset = asset_to_render
+                        closest_intersection_point = intersection_point_candidate
                 
                 final_color_vec3 = Vec3(0,0,0) # Background color if no hit
                 if closest_hit_asset:

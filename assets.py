@@ -18,7 +18,6 @@ class Ray:
         self.o = o
         self.d = normalize(d)
 
-#TODO: do zintegrowania
 class Asset:
     def __init__(self, pos=Vec3(0, 0, 0), color=Vec3(1, 1, 1)):
         self.pos = pos
@@ -58,14 +57,10 @@ class Sphere:
         # Upewnij się, że ray.o i self.pos są obiektami Vec3
         cam_sphere = self.pos - ray.o  # odległość kamera-kula
         
-        # Sprawdź, czy początek promienia znajduje się wewnątrz kuli
         if norm(cam_sphere) < self.radius:
-            # Obsługa sytuacji, gdy początek promienia jest wewnątrz kuli:
-            # Dla uproszczenia możemy przyjąć, że przecina się w ray.o lub znaleźć punkt wyjścia.
-            # Obecna logika może zawieść lub dać ujemną odległość.
-            # Solidne rozwiązanie znalazłoby przednie przecięcie.
-            # Na razie załóżmy, że początek promienia jest na zewnątrz lub na powierzchni.
-            pass # Lub zaimplementuj specyficzną logikę dla początku wewnątrz
+            # do sprawdzenia, czy promień nie jest w środku kuli
+            pass
+         
 
         len_cam_sphere = norm(cam_sphere)
         if len_cam_sphere == 0: # Początek promienia znajduje się w środku kuli
@@ -74,10 +69,6 @@ class Sphere:
 
         # Rzut cam_sphere na kierunek promienia
         t_ca = dot(cam_sphere, ray.d)
-
-        # Jeśli kula jest za początkiem promienia, a promień jest skierowany od niej
-        # if t_ca < 0 and len_cam_sphere > self.radius: # Bardziej solidne sprawdzenie: rzutowany środek kuli jest za początkiem
-        #     return False, None
         
         # Odległość od środka kuli do najbliższego punktu na linii promienia
         # d_sq = norm(cam_sphere - t_ca * ray.d)**2 # To jest (odległość_promień_kula)^2

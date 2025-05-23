@@ -1,12 +1,156 @@
 import contextlib
 with contextlib.redirect_stdout(None): # aby nie wyswietlać przywitania od biblioteki pygame
     import pygame
-from Vec3 import Vec3, normalize, dot, cross, norm, mul_vec3
-from assets import Camera, Sphere, Light, Material, floatto8bit, Ray
-from materials import *
+from pygame.math import Vector3
+import math # Used in Camera for a more robust shoot_ray
+
+# --- Helper function (from original assets.py) ---
+def floatto8bit(value):
+    """Converts a float (0.0-1.0) to an 8-bit integer (0-255)."""
+    return max(0, min(255, int(value * 255)))
+
+# --- Class Definitions (modified from original assets.py) ---
+class Ray:
+    def __init__(self, origin: Vector3, direction: Vector3):
+        self.o = origin
+        if direction.length_squared() > 0: # Ensure direction is not zero vector before normalizing
+            self.d = direction.normalize()
+        else:
+            self.d = Vector3(0,0,0) # Or handle as an error
+
+class Material:
+    def __init__(self, name:str, color: Vector3, ambient_coeff: float, diffuse_coeff: float, specular_coeff: float, shininess: float):
+        self.name = name
+        self.color = color # Base color of the material
+        self.ambient_coeff = ambient_coeff
+        self.diffuse_coeff = diffuse_coeff
+        self.specular_coeff = specular_coeff
+        self.shininess = shininess
+
+class Camera:
+    def __init__(self, resolution, pos: Vector3 = None, focal_length=1.0, fov_degrees=60.0):
+        self.res_width, self.res_height = resolution
+        self.pos = pos if pos is not None else Vector3(0, 0, 0)
+        self.focal_length = focal_length # Can be used if not using FOV method
+
+        # FOV related calculations for shoot_ray
+        self.aspect_ratio = self.res_width / self.res_height
+        # Convert FOV from degrees to radians for math.tan
+        fov_radians = math.radians(fov_degrees)
+        self.sensor_height_fov_scaled = 2.0 * math.tan(fov_radians / 2.0)
+        self.sensor_width_fov_scaled = self.sensor_height_fov_scaled * self.aspect_ratio
 
 
+    def shoot_ray(self, u_pixel, v_pixel):
+        # Camera at origin (self.pos), looking along +Y axis.
+        # Image plane (XZ) is at Y = self.focal_length (or implicitly defined by FOV).
+        # u_pixel (horizontal) maps to X, v_pixel (vertical) maps to Z.
 
+        # Normalized Device Coordinates (NDC): map pixel coords from [0, res-1] to [-1, 1]
+        # Add 0.5 to sample center of pixel
+        ndc_x = (u_pixel + 0.5) / self.res_width * 2.0 - 1.0
+        ndc_y = (v_pixel + 0.5) / self.res_height * 2.0 - 1.0 # Ranges from -1 (top) to 1 (bottom)
+
+        # Screen/Camera space coordinates using FOV
+        # Y-axis is forward, X-axis is right, Z-axis is up (for a typical setup looking down an axis)
+        # If camera looks along +Y:
+        #   X on screen -> X world
+        #   Y on screen -> Z world (Y is depth)
+        # We flip ndc_y because typically positive Y in screen space is downwards.
+        camera_space_x = ndc_x * self.sensor_width_fov_scaled / 2.0
+        camera_space_z = -ndc_y * self.sensor_height_fov_scaled / 2.0 # Negative because v_pixel increases downwards
+
+        # Direction vector in camera space (camera looks along +Y)
+        # If focal_length is 1, sensor_..._scaled already includes the tan(FOV/2) factor.
+        # The "forward" component for direction is effectively 1 unit if FOV scaling is applied to X and Z.
+        ray_dir_camera_space = Vector3(camera_space_x, 1.0, camera_space_z)
+
+        
+        if ray_dir_camera_space.length_squared() > 0:
+            return Ray(self.pos, ray_dir_camera_space.normalize())
+        else:
+            return Ray(self.pos, Vector3(0,1,0)) # Default ray if direction is zero
+
+class Sphere:
+    def __init__(self, pos: Vector3, radius: float, material: Material):
+        self.pos = pos
+        self.radius = radius
+        self.material = material
+
+    def intersect(self, ray: Ray):
+        oc = ray.o - self.pos
+        a = ray.d.length_squared() # ray.d is normalized, so this should be 1.0
+        b = 2.0 * oc.dot(ray.d)
+        c = oc.length_squared() - self.radius * self.radius
+        
+        discriminant = b*b - 4*a*c
+        if discriminant < 0:
+            return False, None
+        else:
+            sqrt_discriminant = discriminant**0.5
+            t1 = (-b - sqrt_discriminant) / (2.0*a)
+            t2 = (-b + sqrt_discriminant) / (2.0*a)
+            
+            t = -1.0
+            # Check for smallest positive t (intersection in front of ray origin)
+            # Use a small epsilon (e.g., 1e-4) to avoid self-intersection issues
+            epsilon = 1e-4
+            if t1 > epsilon and (t1 < t2 or t2 <= epsilon):
+                t = t1
+            elif t2 > epsilon:
+                t = t2
+            else:
+                return False, None # Both intersections are behind or too close
+            
+            intersection_point = ray.o + ray.d * t
+            return True, intersection_point
+
+    def normal(self, surface_point: Vector3):
+        if (surface_point - self.pos).length_squared() > 0:
+            return (surface_point - self.pos).normalize()
+        return Vector3(0,1,0) # Should not happen for valid surface_point
+
+class Light:
+    def __init__(self, pos: Vector3, color: Vector3, strength: float, radius: float):
+        self.pos = pos
+        self.color = color
+        self._strength = strength
+        self.radius = radius # Used for attenuation falloff
+
+    def strength(self, point: Vector3):
+        # Calculate distance squared for attenuation
+        vec_to_light = self.pos - point
+        dist_sq = vec_to_light.length_squared()
+        
+        # Attenuation model (prevents division by zero and gives falloff)
+        # Original: self._strength / (1 + dist_sq / self.radius**2)
+        if self.radius > 0:
+            attenuation = 1.0 / (1.0 + dist_sq / (self.radius * self.radius))
+        else: # Avoid division by zero if radius is 0, simpler attenuation
+            attenuation = 1.0 / (1.0 + dist_sq) 
+            
+        return self._strength * attenuation
+
+# --- Material Definitions (from original materials.py) ---
+kreda_material = Material(
+    name="Kreda", color=Vector3(0.9, 0.9, 0.9),
+    ambient_coeff=0.2, diffuse_coeff=0.8, specular_coeff=0.1, shininess=5
+)
+metal_material = Material(
+    name="Metal", color=Vector3(0.75, 0.75, 0.8),
+    ambient_coeff=0.3, diffuse_coeff=0.6, specular_coeff=0.9, shininess=100
+)
+guma_material = Material(
+    name="Guma", color=Vector3(0.1, 0.1, 0.1),
+    ambient_coeff=0.1, diffuse_coeff=0.7, specular_coeff=0.3, shininess=10
+)
+plastik_material = Material(
+    name="Plastik", color=Vector3(0.3, 0.3, 0.8),
+    ambient_coeff=0.2, diffuse_coeff=0.7, specular_coeff=0.6, shininess=30
+)
+
+
+# --- Main Raytracing Logic ---
 def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
     """
     Oblicza kolor dla piksela poprzez wystrzelenie pojedynczego promienia, włączając sprawdzanie cieni.
@@ -16,65 +160,85 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
     :param light: obiekt Light
     :param asset: główny obiekt, z którym ten promień się przeciął
     :param all_scene_assets: lista wszystkich obiektów na scenie do sprawdzania cieni
-    :return: kolor Vec3 dla piksela
+    :return: kolor Vector3 dla piksela
     """
     
-    ray = camera.shoot_ray(u, v) # Wystrzel promień dla danego piksela
+    ray = camera.shoot_ray(u, v) 
     intersected, intersection_point = asset.intersect(ray)
     
-    pixel_color = Vec3(0, 0, 0) # Domyślny kolor tła
+    pixel_color = Vector3(0, 0, 0) # Domyślny kolor tła
     if intersected:
         surface_normal = asset.normal(intersection_point)
         vec_to_light_source = light.pos - intersection_point
         
-        light_dir_normalized = normalize(vec_to_light_source)
-        view_dir_normalized = normalize(ray.o - intersection_point)
+        # Normalize vectors if they are not zero vectors
+        light_dir_normalized = Vector3(0,0,0)
+        if vec_to_light_source.length_squared() > 0:
+            light_dir_normalized = vec_to_light_source.normalize()
+        
+        view_dir_vec = ray.o - intersection_point
+        view_dir_normalized = Vector3(0,0,0)
+        if view_dir_vec.length_squared() > 0:
+            view_dir_normalized = view_dir_vec.normalize()
+
 
         # Sprawdzanie cienia
         in_shadow = False
-        # Przesuń punkt początkowy nieco wzdłuż normalnej, aby uniknąć samo-przecięcia
         shadow_ray_origin = intersection_point + surface_normal * 1e-4 
         shadow_ray = Ray(shadow_ray_origin, light_dir_normalized)
         
-        distance_to_light = norm(vec_to_light_source)
+        distance_to_light = vec_to_light_source.length()
 
         for occluder in all_scene_assets:
-            # Nie ma potrzeby sprawdzać przecięcia, jeśli obiekt zasłaniający jest samym źródłem światła
-            # lub jeśli sprawdzamy z przezroczystym obiektem, który nie rzuca pełnych cieni.
-           
+            if occluder is asset: # Don't check self-shadowing with the primary asset here, shadow_ray_origin handles it
+                # This check might be too simple if occluder can be partially transparent etc.
+                # but for opaque objects, this avoids re-intersecting the same surface immediately.
+                # However, the primary asset *can* cast a shadow on itself from another part.
+                # The 1e-4 offset is the main guard against immediate self-intersection.
+                pass # Allow checking self-shadowing from other parts of the same complex object (if applicable)
+
             shadow_intersected, shadow_hit_point = occluder.intersect(shadow_ray)
             if shadow_intersected:
-                dist_to_shadow_hit = norm(shadow_hit_point - shadow_ray_origin)
-                # Jeśli trafienie jest między punktem a światłem
+                dist_to_shadow_hit = (shadow_hit_point - shadow_ray_origin).length()
                 if dist_to_shadow_hit < distance_to_light:
                     in_shadow = True
                     break 
         
         # Składowa otoczenia (zawsze obecna)
-        # Use material properties for ambient color
-        color_ambient = all_scene_assets[0].material.ambient_coeff * all_scene_assets[0].material.color
+        # Corrected to use current asset's material
+        color_ambient = asset.material.color * asset.material.ambient_coeff
         
-        color_diffuse = Vec3(0,0,0)
-        color_specular = Vec3(0,0,0)
+        color_diffuse = Vector3(0,0,0)
+        color_specular = Vector3(0,0,0)
 
         if not in_shadow:
-            light_intensity_at_point = light.strength(intersection_point) * light.color
+            # Calculate light intensity at the intersection point (considering attenuation)
+            # light.strength already includes attenuation. light.color is the light's color.
+            light_intensity_at_point = light.color * light.strength(intersection_point)
             
             # Składowa rozproszenia
-            # Użyj 'asset.material.diffuse_coeff' zamiast 'all_scene_assets[0].material.' i brakującego współczynnika
-            diffuse_factor = max(dot(surface_normal, light_dir_normalized), 0.0)
-            color_diffuse = asset.material.diffuse_coeff * diffuse_factor * light_intensity_at_point
+            diffuse_factor = max(surface_normal.dot(light_dir_normalized), 0.0)
+            color_diffuse = light_intensity_at_point * (asset.material.diffuse_coeff * diffuse_factor)
             
             # Składowa odbicia lustrzanego
-            r_vec_orig_style = normalize(2 * surface_normal * dot(surface_normal, light_dir_normalized) - light_dir_normalized)
-            # Użyj 'asset.material.shininess' zamiast globalnego 'n_specular'
-            specular_factor = pow(max(dot(r_vec_orig_style, view_dir_normalized), 0.0), asset.material.shininess)
-            # Użyj 'asset.material.specular_coeff' zamiast globalnego 'k_specular'
-            color_specular = asset.material.specular_coeff * specular_factor * light_intensity_at_point
+            # Blinn-Phong reflection model (uses halfway vector) is often more efficient/stable
+            # Original Phong: R = 2 * N * dot(N, L) - L
+            if light_dir_normalized.length_squared() > 0: # Ensure L is not zero
+                reflection_vec_phong = (2 * surface_normal * surface_normal.dot(light_dir_normalized) - light_dir_normalized)
+                if reflection_vec_phong.length_squared() > 0:
+                    reflection_vec_phong = reflection_vec_phong.normalize()
+                    specular_factor = pow(max(reflection_vec_phong.dot(view_dir_normalized), 0.0), asset.material.shininess)
+                    color_specular = light_intensity_at_point * (asset.material.specular_coeff * specular_factor)
                         
-        # Ta linia pozostaje bez zmian, zakładając, że 'color_ambient', 'color_diffuse' i 'color_specular'
-        # są składowymi światła (typu Vec3), które są następnie modulowane przez bazowy kolor materiału.
-        pixel_color = mul_vec3(asset.material.color, color_ambient + color_diffuse + color_specular)
+        # Combine lighting components and modulate by material's base color
+        total_illumination = color_ambient + color_diffuse + color_specular
+        
+        # Component-wise multiplication for color modulation
+        pixel_color = Vector3(
+            asset.material.color.x * total_illumination.x,
+            asset.material.color.y * total_illumination.y,
+            asset.material.color.z * total_illumination.z
+        )
 
     return pixel_color
 
@@ -82,13 +246,11 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
 def main_realtime():
     pygame.init()
 
-    #informacje o materialach
-    available_materials = [metal_material, kreda_material,guma_material,plastik_material] 
+    available_materials = [metal_material, kreda_material, guma_material, plastik_material] 
     current_material_index = 0
 
-    # ustawienia okna
-    rendering_res = 50 # Internal rendering resolution
-    scale_factor = 10 # How many times to scale up the rendered image
+    rendering_res = 100
+    scale_factor = 8
     
     display_width = rendering_res * scale_factor
     display_height = rendering_res * scale_factor
@@ -96,28 +258,24 @@ def main_realtime():
     screen = pygame.display.set_mode((display_width, display_height))
     pygame.display.set_caption(f"RayTracer Czasu Rzeczywistego (Render: {rendering_res}x{rendering_res}, Display: {display_width}x{display_height})")
 
-    # Create an off-screen surface for rendering
     render_surface = pygame.Surface((rendering_res, rendering_res))
 
-    # ustawienia kamery
-    camera = Camera((rendering_res, rendering_res)) # pozycja 0,0,0
+    # Camera: pos (0,0,0), looking +Y, FOV 60 degrees.
+    camera = Camera(resolution=(rendering_res, rendering_res), pos=Vector3(0,0,0), fov_degrees=60.0)
 
-    # PARAMETRY OBIEKTU
     sphere_radius = 0.5
-    sphere_pos = Vec3(0, 2, 0) # Adjusted Y to be further from camera for better view
+    sphere_pos = Vector3(0, 2, 0) # Y=2 means 2 units "in front" of camera if camera looks +Y
     sphere = Sphere(pos=sphere_pos, radius=sphere_radius, material=available_materials[current_material_index])
 
-    # PARAMETRY ŚWIATŁA
-    light_pos = Vec3(1, -2.4, -2.4)
-    light_color = Vec3(1,1,1) # White light for more general material appearance
+    light_pos = Vector3(1, -2.4, -2.4) # Relative to world origin
+    light_color = Vector3(1,1,1) 
     light_strength = 1.5
-    light_radius = 10 # This radius is for attenuation, not physical size
+    light_radius = 10 
     light = Light(pos=light_pos, color=light_color, strength=light_strength, radius=light_radius)
 
-    light_move_speed = 1 # szybkość poruszania światłem (sensitivity)
+    light_move_speed = 2 # Adjusted for finer control
 
     scene_assets = [sphere]
-    # asset_to_render = sphere # This will be determined per pixel now
 
     running = True
     clock = pygame.time.Clock()
@@ -142,13 +300,13 @@ def main_realtime():
     Klawisz X:        Zmiana materiału kuli (cyklicznie)
 
     Parametry początkowe kuli:
-    Pozycja (X, Y, Z): ({sphere.pos.x}, {sphere.pos.y}, {sphere.pos.z})
+    Pozycja (X, Y, Z): ({sphere.pos.x:.1f}, {sphere.pos.y:.1f}, {sphere.pos.z:.1f})
     Promień:           {sphere.radius}
     Materiał:          {initial_sphere_material_name}
 
     Parametry początkowe światła:
-    Pozycja (X, Y, Z): ({light.pos.x}, {light.pos.y}, {light.pos.z})
-    Kolor (R, G, B):   ({light.color.x}, {light.color.y}, {light.color.z})
+    Pozycja (X, Y, Z): ({light.pos.x:.1f}, {light.pos.y:.1f}, {light.pos.z:.1f})
+    Kolor (R, G, B):   ({light.color.x:.2f}, {light.color.y:.2f}, {light.color.z:.2f})
     Siła:              {light._strength}
     Promień działania: {light.radius}
 
@@ -156,7 +314,7 @@ def main_realtime():
     Rozdzielczość renderowania: {rendering_res}x{rendering_res} pikseli
     Rozdzielczość wyświetlania: {display_width}x{display_height} pikseli
     Skala wyświetlania:         {scale_factor}x
-    Pozycja kamery:             (0, 0, 0) (domyślna)
+    Pozycja kamery:             ({camera.pos.x:.1f}, {camera.pos.y:.1f}, {camera.pos.z:.1f}) (FOV: {60} deg)
     ----------------------------------------------------
         """
     print(info_string)
@@ -168,52 +326,59 @@ def main_realtime():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                if event.key == pygame.K_LEFT:
+                if event.key == pygame.K_UP: # Move light +Z
                     light.pos.z += light_move_speed
-                if event.key == pygame.K_RIGHT:
+                if event.key == pygame.K_DOWN: # Move light -Z
                     light.pos.z -= light_move_speed
-                if event.key == pygame.K_UP:
+                if event.key == pygame.K_LEFT: # Move light -X
                     light.pos.x -= light_move_speed
-                if event.key == pygame.K_DOWN:
+                if event.key == pygame.K_RIGHT: # Move light +X
                     light.pos.x += light_move_speed
-                if event.key == pygame.K_PAGEUP:
+                if event.key == pygame.K_PAGEUP: # Move light +Y
                     light.pos.y += light_move_speed
-                if event.key == pygame.K_PAGEDOWN:
+                if event.key == pygame.K_PAGEDOWN: # Move light -Y
                     light.pos.y -= light_move_speed
                 
                 if event.key == pygame.K_x:
                     current_material_index = (current_material_index + 1) % len(available_materials)
-                    # Assuming all assets in scene_assets that can change material should change
                     for asset_in_scene in scene_assets:
-                        if isinstance(asset_in_scene, Sphere): # Or some other check if needed
+                        if isinstance(asset_in_scene, Sphere): 
                             asset_in_scene.material = available_materials[current_material_index]
                     print(f"Materiał kul zmieniony na: {available_materials[current_material_index].name}")
 
-        # --- Rendering phase (to off-screen render_surface) ---
-        for u_pixel in range(camera.res_width): # camera.res_width is rendering_res
-            for v_pixel in range(camera.res_height): # camera.res_height is rendering_res
-                primary_ray = camera.shoot_ray(u_pixel, v_pixel)
+        for u_pixel in range(camera.res_width):
+            for v_pixel in range(camera.res_height):
+                # Find closest intersected asset
+                # For this simple scene, there's only one sphere.
+                # A more general ray tracer would iterate all_scene_assets here for primary rays.
                 closest_hit_asset = None
                 min_dist = float('inf')
                 
-                # Find closest intersected asset
-                # (This part was simplified in your original code to only check asset_to_render)
-                # For a more general ray tracer, you'd loop through all scene_assets here.
-                # For now, we'll stick to the single sphere for simplicity, but use the list.
-                temp_intersection_point = None # To store the intersection point of the closest hit
+                # This loop is a bit redundant if calculate_pixel_color re-shoots ray and re-intersects.
+                # However, it's needed if we want to find THE asset to shade.
+                # Original code passed 'asset_to_render' which was just 'sphere'.
+                # This structure is better for multiple objects.
+                primary_ray_for_selection = camera.shoot_ray(u_pixel, v_pixel)
+                
+                temp_intersection_point_candidate = None # Not strictly needed if re-intersecting in calc_pixel_color
 
-                for asset_in_scene in scene_assets:
-                    intersected, intersection_point_candidate = asset_in_scene.intersect(primary_ray)
+                for asset_in_scene in scene_assets: # Currently only one sphere
+                    intersected, intersection_point_candidate = asset_in_scene.intersect(primary_ray_for_selection)
                     if intersected:
-                        dist = norm(intersection_point_candidate - primary_ray.o)
-                        if dist < min_dist:
-                            min_dist = dist
+                        # dist = (intersection_point_candidate - primary_ray_for_selection.o).length()
+                        # For primary ray, intersection_point_candidate.y (if camera looks along Y)
+                        # or .z (if camera looks along Z) can be used as depth.
+                        # Or simply distance.
+                        dist_sq = (intersection_point_candidate - primary_ray_for_selection.o).length_squared()
+                        if dist_sq < min_dist:
+                            min_dist = dist_sq
                             closest_hit_asset = asset_in_scene
-                            # temp_intersection_point = intersection_point_candidate # Not needed directly here, calculate_pixel_color re-calculates intersection
+                            # temp_intersection_point_candidate = intersection_point_candidate # Store if needed
 
-                final_color_vec3 = Vec3(0,0,0) 
+                final_color_vec3 = Vector3(0,0,0) 
                 if closest_hit_asset:
-                    # Pass u_pixel, v_pixel corresponding to the render_surface resolution
+                    # calculate_pixel_color will re-shoot the ray and re-intersect.
+                    # This is slightly inefficient but keeps calculate_pixel_color self-contained.
                     final_color_vec3 = calculate_pixel_color(u_pixel, v_pixel, camera, light, closest_hit_asset, scene_assets)
                 
                 r = floatto8bit(final_color_vec3.x)
@@ -221,20 +386,15 @@ def main_realtime():
                 b = floatto8bit(final_color_vec3.z)
                 render_surface.set_at((u_pixel, v_pixel), (r, g, b))
 
-        # --- Scaling and Display phase ---
-        # Scale the render_surface to the display size
         scaled_surface = pygame.transform.scale(render_surface, (display_width, display_height))
-        
-        # Blit the scaled surface to the main screen
         screen.blit(scaled_surface, (0, 0))
 
-        # --- UI Overlay (draw on top of the scaled image) ---
         fps = clock.get_fps()
         fps_text = font.render(f"FPS: {fps:.1f}", True, pygame.Color('white'), pygame.Color('black'))
-        screen.blit(fps_text, (10, 10)) # Adjusted position slightly
+        screen.blit(fps_text, (10, 10))
         
         light_pos_text = font.render(f"Światło: ({light.pos.x:.1f}, {light.pos.y:.1f}, {light.pos.z:.1f})", True, pygame.Color('white'), pygame.Color('black'))
-        screen.blit(light_pos_text, (10, 35)) #position
+        screen.blit(light_pos_text, (10, 35))
 
         sphere_pos_text = font.render(f"Kula: ({sphere_pos.x:.1f}, {sphere_pos.y:.1f}, {sphere_pos.z:.1f}) R={sphere_radius:.1f}", True, pygame.Color('white'), pygame.Color('black'))
         screen.blit(sphere_pos_text, (10, 60)) 
@@ -243,9 +403,8 @@ def main_realtime():
         material_text = font.render(f"Materiał: {current_material_name}", True, pygame.Color('white'), pygame.Color('black'))
         screen.blit(material_text, (10, 85))
 
-
         pygame.display.flip()
-        clock.tick(60) # Cap FPS if desired, or leave empty for max
+        clock.tick(0) # 0 for uncapped FPS, or e.g. 60 for 60 FPS cap
 
     pygame.quit()
 

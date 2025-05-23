@@ -7,13 +7,6 @@ from materials import *
 
 
 
-# Parametry materiału
-ambient_color_effect = 0.4 * Vec3(0.4, 0.4, 1)
-k_ambient = 1.0
-k_diffuse = 2.0
-k_specular = 10.0
-n_specular = 50.0
-
 def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
     """
     Oblicza kolor dla piksela poprzez wystrzelenie pojedynczego promienia, włączając sprawdzanie cieni.
@@ -48,8 +41,7 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
         for occluder in all_scene_assets:
             # Nie ma potrzeby sprawdzać przecięcia, jeśli obiekt zasłaniający jest samym źródłem światła
             # lub jeśli sprawdzamy z przezroczystym obiektem, który nie rzuca pełnych cieni.
-            if occluder is asset and not asset.material.casts_self_shadow: # Example: don't self-shadow if material says so
-                continue
+           
             shadow_intersected, shadow_hit_point = occluder.intersect(shadow_ray)
             if shadow_intersected:
                 dist_to_shadow_hit = norm(shadow_hit_point - shadow_ray_origin)
@@ -60,7 +52,7 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
         
         # Składowa otoczenia (zawsze obecna)
         # Use material properties for ambient color
-        color_ambient = asset.material.k_ambient * asset.material.ambient_color_effect
+        color_ambient = all_scene_assets[0].material.ambient_coeff * all_scene_assets[0].material.color
         
         color_diffuse = Vec3(0,0,0)
         color_specular = Vec3(0,0,0)
@@ -69,15 +61,20 @@ def calculate_pixel_color(u, v, camera, light, asset, all_scene_assets):
             light_intensity_at_point = light.strength(intersection_point) * light.color
             
             # Składowa rozproszenia
+            # Użyj 'asset.material.diffuse_coeff' zamiast 'all_scene_assets[0].material.' i brakującego współczynnika
             diffuse_factor = max(dot(surface_normal, light_dir_normalized), 0.0)
-            color_diffuse = asset.material.k_diffuse * diffuse_factor * light_intensity_at_point
+            color_diffuse = asset.material.diffuse_coeff * diffuse_factor * light_intensity_at_point
             
             # Składowa odbicia lustrzanego
             r_vec_orig_style = normalize(2 * surface_normal * dot(surface_normal, light_dir_normalized) - light_dir_normalized)
-            specular_factor = pow(max(dot(r_vec_orig_style, view_dir_normalized), 0.0), asset.material.n_specular)
-            color_specular = asset.material.k_specular * specular_factor * light_intensity_at_point
+            # Użyj 'asset.material.shininess' zamiast globalnego 'n_specular'
+            specular_factor = pow(max(dot(r_vec_orig_style, view_dir_normalized), 0.0), asset.material.shininess)
+            # Użyj 'asset.material.specular_coeff' zamiast globalnego 'k_specular'
+            color_specular = asset.material.specular_coeff * specular_factor * light_intensity_at_point
                         
-        pixel_color = mul_vec3(asset.material.base_color, color_ambient + color_diffuse + color_specular)
+        # Ta linia pozostaje bez zmian, zakładając, że 'color_ambient', 'color_diffuse' i 'color_specular'
+        # są składowymi światła (typu Vec3), które są następnie modulowane przez bazowy kolor materiału.
+        pixel_color = mul_vec3(asset.material.color, color_ambient + color_diffuse + color_specular)
 
     return pixel_color
 
@@ -90,8 +87,8 @@ def main_realtime():
     current_material_index = 0
 
     # ustawienia okna
-    rendering_res = 200 # Internal rendering resolution
-    scale_factor = 3 # How many times to scale up the rendered image
+    rendering_res = 50 # Internal rendering resolution
+    scale_factor = 10 # How many times to scale up the rendered image
     
     display_width = rendering_res * scale_factor
     display_height = rendering_res * scale_factor
@@ -117,14 +114,14 @@ def main_realtime():
     light_radius = 10 # This radius is for attenuation, not physical size
     light = Light(pos=light_pos, color=light_color, strength=light_strength, radius=light_radius)
 
-    light_move_speed = 0.2 # szybkość poruszania światłem
+    light_move_speed = 1 # szybkość poruszania światłem (sensitivity)
 
     scene_assets = [sphere]
     # asset_to_render = sphere # This will be determined per pixel now
 
     running = True
     clock = pygame.time.Clock()
-    font = pygame.font.Font(None, 24) # Font size might need adjustment for larger display
+    font = pygame.font.Font(None, 24)
 
     initial_sphere_material_name = available_materials[current_material_index].name
 

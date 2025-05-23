@@ -234,11 +234,14 @@ def main_realtime():
         screen.blit(fps_text, (10, 10)) # Adjusted position slightly
         
         light_pos_text = font.render(f"Światło: ({light.pos.x:.1f}, {light.pos.y:.1f}, {light.pos.z:.1f})", True, pygame.Color('white'), pygame.Color('black'))
-        screen.blit(light_pos_text, (10, 35)) # Adjusted position
+        screen.blit(light_pos_text, (10, 35)) #position
+
+        sphere_pos_text = font.render(f"Kula: ({sphere_pos.x:.1f}, {sphere_pos.y:.1f}, {sphere_pos.z:.1f}) R={sphere_radius:.1f}", True, pygame.Color('white'), pygame.Color('black'))
+        screen.blit(sphere_pos_text, (10, 60)) 
 
         current_material_name = available_materials[current_material_index].name
         material_text = font.render(f"Materiał: {current_material_name}", True, pygame.Color('white'), pygame.Color('black'))
-        screen.blit(material_text, (10, 60))
+        screen.blit(material_text, (10, 85))
 
 
         pygame.display.flip()
